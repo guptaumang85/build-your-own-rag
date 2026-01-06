@@ -73,4 +73,4 @@ You need to have these keWys in your .env file to call an llm. You need to creat
 account and purchase. Min $5.
 
 Install required packages and
-Run **rag_implementation.py**WW
+Run **rag_implementation.py**
