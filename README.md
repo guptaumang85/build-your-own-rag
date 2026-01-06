@@ -69,7 +69,7 @@ Create a .env file (NOT committed):
 # API Keys
 TOGETHER_API_KEY=
 ```
-You need to have these keWys in your .env file to call an llm. You need to create
+You need to have these key in your .env file to call an llm. You need to create
 account and purchase. Min $5.
 
 Install required packages and
