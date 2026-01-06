@@ -20,7 +20,29 @@ This implementation uses:
 - An LLM (Together.ai, OpenAI, or HF models) for generation
 - Vector store for efficient search
 
+You'll build a RAG pipeline using a dataset containing news information from BBC News. The goal is to enable the LLM to retrieve relevant news details from the dataset and use that information to generate more informed responses. The model you'll be using is the llama-3-1-8b-instruct-turbo, which was trained on data up to December 2023. The idea is to create a RAG system that allows it to include information on events that occurred in 2024.
+
 ---
+
+## 📊 Dataset
+
+This project uses the **News Headlines 2024** dataset from Kaggle.
+
+**Dataset link:**  
+https://www.kaggle.com/datasets/dylanjcastillo/news-headlines-2024
+
+### 📌 About the Dataset
+The dataset contains **thousands of news headlines from BBC News**, along with related metadata. It is well-suited for building and evaluating Retrieval-Augmented Generation (RAG) systems because it provides:
+
+- Short, information-dense text (headlines)
+- Real-world news content
+- Sufficient volume for embedding, indexing, and retrieval
+
+### 🧾 Key Columns (Typical)
+- `headline` – The news headline text  
+- `description` / `short_description` – Additional context (if available)  
+- `date` – Publication date  
+- `source` – News source (BBC News)
 
 ## 🚀 Features
 
