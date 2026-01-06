@@ -42,11 +42,13 @@ python -m venv rag-venv
 source rag-venv/bin/activate      # macOS/Linux
 # rag-venv\Scripts\activate        # Windows
 pip install --upgrade pip
-pip install -r requirements.txt
 
 Create a .env file (NOT committed):
 # API Keys
 TOGETHER_API_KEY=
 ```
-You need to have these keys in your .env file to call an llm. You need to create
+You need to have these keWys in your .env file to call an llm. You need to create
 account and purchase. Min $5.
+
+Install required packages and
+Run **rag_implementation.py**WW
