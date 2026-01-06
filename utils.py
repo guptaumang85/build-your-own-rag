@@ -40,7 +40,6 @@ def read_dataframe(path):
     df= df.to_dict(orient='records')
     return df
 
-
 def generate_with_single_input(prompt: str, 
                                role: str = 'assistant', 
                                top_p: float = None, 
@@ -79,8 +78,6 @@ def generate_with_single_input(prompt: str,
         raise Exception(f"Failed to get correct output dict. Please try again. Error: {e}")
     return output_dict
 
-
-
 def concatenate_fields(dataset, fields):
     # Initialize the list where the texts will be stored    
     concatenated_data = [] 
@@ -106,11 +103,7 @@ def concatenate_fields(dataset, fields):
     
     return concatenated_data
 
-
-
-
 NEWS_DATA = pd.read_csv("./news_data_dedup.csv").to_dict(orient = 'records')
-
 
 def retrieve(query, top_k = 5):
     query_embedding = model.encode(query)
@@ -122,105 +115,3 @@ def retrieve(query, top_k = 5):
     top_k_indices = similarity_indices[:top_k]
 
     return top_k_indices
-
-import ipywidgets as widgets
-from IPython.display import display, Markdown
-
-def display_widget(llm_call_func):
-    def on_button_click(b):
-        # Clear outputs
-        output1.clear_output()
-        output2.clear_output()
-        status_output.clear_output()
-        # Display "Generating..." message
-        status_output.append_stdout("Generating...\n")
-        query = query_input.value
-        top_k = slider.value
-        prompt = prompt_input.value.strip() if prompt_input.value.strip() else None
-        response1 = llm_call_func(query, use_rag=True, top_k=top_k, prompt=prompt)
-        response2 = llm_call_func(query, use_rag=False, top_k=top_k, prompt=prompt)
-        # Update responses
-        with output1:
-            display(Markdown(response1))
-        with output2:
-            display(Markdown(response2))
-        # Clear "Generating..." message
-        status_output.clear_output()
-
-    query_input = widgets.Text(
-        description='Query:',
-        placeholder='Type your query here',
-        layout=widgets.Layout(width='100%')
-    )
-
-    prompt_input = widgets.Textarea(
-        description='Augmented prompt layout:',
-        placeholder=("Type your prompt layout here, don't forget to add {query} and {documents} "
-                     "where you want them to be placed! Leaving this blank will default to the "
-                     "prompt in generate_final_prompt. Example:\nThis is a query: {query}\nThese are the documents: {documents}"),
-        layout=widgets.Layout(width='100%', height='100px'),
-        style={'description_width': 'initial'}
-    )
-
-    slider = widgets.IntSlider(
-        value=5,  # default value
-        min=1,
-        max=20,
-        step=1,
-        description='Top K:',
-        style={'description_width': 'initial'}
-    )
-
-    output1 = widgets.Output(layout={'border': '1px solid #ccc', 'width': '45%'})
-    output2 = widgets.Output(layout={'border': '1px solid #ccc', 'width': '45%'})
-    status_output = widgets.Output()
-
-    submit_button = widgets.Button(
-        description="Get Responses",
-        style={'button_color': '#f0f0f0', 'font_color': 'black'}
-    )
-    submit_button.on_click(on_button_click)
-
-    label1 = widgets.Label(value="With RAG", layout={'width': '45%', 'text_align': 'center'})
-    label2 = widgets.Label(value="Without RAG", layout={'width': '45%', 'text_align': 'center'})
-
-    display(widgets.HTML("""
-    <style>
-        .custom-output {
-            background-color: #f9f9f9;
-            color: black;
-            border-radius: 5px;
-        }
-        .widget-textarea, .widget-button {
-            background-color: #f0f0f0 !important;
-            color: black !important;
-            border: 1px solid #ccc !important;
-        }
-        .widget-output {
-            background-color: #f9f9f9 !important;
-            color: black !important;
-        }
-        textarea {
-            background-color: #fff !important;
-            color: black !important;
-            border: 1px solid #ccc !important;
-        }
-    </style>
-    """))
-
-    display(query_input, prompt_input, slider, submit_button, status_output)
-    hbox_labels = widgets.HBox([label1, label2], layout={'justify_content': 'space-between'})
-    hbox_outputs = widgets.HBox([output1, output2], layout={'justify_content': 'space-between'})
-
-    def style_outputs(*outputs):
-        for output in outputs:
-            output.layout.margin = '5px'
-            output.layout.height = '300px'
-            output.layout.padding = '10px'
-            output.layout.overflow = 'auto'
-            output.add_class("custom-output")
-
-    style_outputs(output1, output2)
-    # Display label and output boxes
-    display(hbox_labels)
-    display(hbox_outputs)
