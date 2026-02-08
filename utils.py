@@ -1,7 +1,6 @@
 import json
 import numpy as np
 import pandas as pd
-from pprint import pprint as original_pprint
 from dateutil import parser
 from sentence_transformers import SentenceTransformer
 import joblib
@@ -10,7 +9,9 @@ import requests
 import os 
 from together import Together
 from dotenv import load_dotenv
-
+from typing import Union
+import httpx
+from openai import OpenAI, DefaultHttpxClient
 load_dotenv()
 
 model = SentenceTransformer("BAAI/bge-base-en-v1.5")
@@ -149,3 +150,59 @@ def retrieve(query, top_k = 5):
     top_k_indices = similarity_indices[:top_k]
 
     return top_k_indices
+
+transport = httpx.HTTPTransport(local_address="0.0.0.0", verify=False)
+
+# Create a DefaultHttpxClient instance with the custom transport
+http_client = DefaultHttpxClient(transport=transport)
+
+def print_object_properties(obj: Union[dict, list]) -> None:
+    t = ''
+    if isinstance(obj, dict):
+        keys = list(obj.keys())
+        keys.sort()
+        for x in keys:
+            y = obj[x]
+            if x == 'article_content':
+                t += f'{x}: {y[:100]}...(truncated)\n'
+            elif x == 'main_vector':
+                t+= f'{x}: {y[:30]}...(truncated)\n'
+            elif x == 'chunk':
+                t+= f'{x}: {y[:100]}...(truncated)\n'
+
+            else:
+                t+= f'{x}: {y}\n'
+    else:
+        for l in obj:
+            print_object_properties(l)
+        
+    print(t)
+
+# Define utility functions and classes
+def generate_embedding(prompt: str, model: str = "BAAI/bge-base-en-v1.5", together_api_key = None, **kwargs):
+    payload = {
+        "model": model,
+        "input": prompt,
+        **kwargs
+    }
+    if (not together_api_key) and ('TOGETHER_API_KEY' not in os.environ):
+        client = OpenAI(
+    api_key = '', # Set any as dlai proxy does not use it. Set the together api key if using the together endpoint
+    base_url="http://proxy.dlai.link/coursera_proxy/together/", # If using together endpoint, add it here https://api.together.xyz/
+   http_client=http_client, # ssl bypass to make it work via proxy calls, remove it if running with together.ai endpoint 
+)
+        try:
+            json_dict = client.embeddings.create(**payload).model_dump()
+            return json_dict['data'][0]['embedding']
+        except Exception as e:
+            raise Exception(f"Failed to get correct output from LLM call.\nException: {e}")
+    else:
+        if together_api_key is None:
+            together_api_key = os.environ['TOGETHER_API_KEY']
+        client = Together(api_key=together_api_key)
+        try:
+            json_dict = client.embeddings.create(**payload).model_dump()
+            return json_dict['data'][0]['embedding']
+        except Exception as e:
+            raise Exception(f"Failed to get correct output from LLM call.\nException: {e}")
+

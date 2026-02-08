@@ -1,7 +1,8 @@
 from utils import (
     retrieve, 
     pprint, 
-    generate_with_single_input, 
+    generate_with_single_input,
+    print_object_properties,
     read_dataframe,
     cosine_similarity
 )
@@ -10,6 +11,12 @@ import joblib
 import numpy as np
 import bm25s
 from sentence_transformers import SentenceTransformer
+import weaviate
+from weaviate.classes.query import (
+    Filter, 
+    Rerank
+)
+
 
 NEWS_DATA = read_dataframe("news_data_dedup.csv")
 pprint(NEWS_DATA[9:11])
@@ -216,78 +223,270 @@ print(f"RRF List: {rrf_list}")
 # BM25 List: [752, 673, 289, 626, 43]
 # RRF List: [673, 752, 626, 743, 289]
 
-def generate_final_prompt(query, top_k, retrieve_function = None, use_rag=True):
-    """
-    Generates an augmented prompt for a Retrieval-Augmented Generation (RAG) system by retrieving the top_k most 
-    relevant documents based on a given query.
+client = weaviate.connect_to_local(port=8079, grpc_port=50050)
+bbc_data = joblib.load('data/bbc_data.joblib')
+collection = client.collections.get("bbc_collection") # collection has to be created in vector db.
+print(f"The number of elements in the collection is: {len(collection)}")
 
-    Parameters:
-    query (str): The search query for which the relevant documents are to be retrieved.
-    top_k (int): The number of top relevant documents to retrieve.
-    retrieve_function (callable): The function used to retrieve relevant documents. If 'reciprocal_rank_fusion', 
-                                  it will combine results from different retrieval functions.
-    use_rag (bool): A flag to determine whether to incorporate retrieved data into the prompt (default is True).
+object = collection.query.fetch_objects(limit = 1, include_vector = True).objects[0]
+print("Printing the properties (some will be truncated due to size)")
+print_object_properties(object.properties)
+print("Vector: (truncated)",object.vector['main_vector'][0:15])
+print("Vector length: ", len(object.vector['main_vector']))
+
+def filter_by_metadata(metadata_property: str, 
+                       values: list[str], 
+                       collection: "weaviate.collections.collection.sync.Collection" , 
+                       limit: int = 5) -> list:
+    """
+    Retrieves objects from a specified collection based on metadata filtering criteria.
+
+    This function queries a collection within the specified client to fetch objects that match 
+    certain metadata criteria. It uses a filter to find objects whose specified 'property' contains 
+    any of the given 'values'. The number of objects retrieved is limited by the 'limit' parameter.
+
+    Args:
+    metadata_property (str): The name of the metadata property to filter on.
+    values (List[str]): A list of values to be matched against the specified property.
+    collection_name (weaviate.collections.collection.sync.Collection): The collection to query.
+    limit (int, optional): The maximum number of objects to retrieve. Defaults to 5.
 
     Returns:
-    str: A prompt that includes the top_k relevant documents formatted for use in a RAG system.
+    List[Object]: A list of objects from the collection that match the filtering criteria.
+    """
+    
+    response = collection.query.fetch_objects(limit=limit, filters = Filter.by_property(metadata_property).contains_any(values))
+    
+    response_objects = [x.properties for x in response.objects]
+    
+    return response_objects
+
+res = filter_by_metadata('title', ['Taylor Swift'], collection, limit = 2)
+for x in res:
+    print_object_properties(x)
+
+def semantic_search_retrieve(query: str,
+                             collection: "weaviate.collections.collection.sync.Collection" , 
+                             top_k: int = 5) -> list:
+    """
+    Performs a semantic search on a collection and retrieves the top relevant chunks.
+
+    This function executes a semantic search query on a specified collection to find text chunks 
+    that are most relevant to the input 'query'. The search retrieves a limited number of top 
+    matching objects, as specified by 'top_k'. The function returns the 'chunk' property of 
+    each of the top matching objects.
+
+    Args:
+    query (str): The search query used to find relevant text chunks.
+    collection (weaviate.collections.collection.sync.Collection): The collection in which the semantic search is performed.
+    top_k (int, optional): The number of top relevant objects to retrieve. Defaults to 5.
+
+    Returns:
+    List[str]: A list of text chunks that are most relevant to the given query.
     """
 
-    # Define the prompt as the initial query
-    prompt = query
+    response = collection.query.near_text(query = query, limit = top_k)
     
-    # If not using rag, return the prompt
+    response_objects = [x.properties for x in response.objects]
+    
+    return response_objects
+
+print_object_properties(semantic_search_retrieve(query = 'Tell me about the last Taylor Swift show', collection = collection, top_k = 2))
+
+def bm25_retrieve(query: str, 
+                  collection: "weaviate.collections.collection.sync.Collection" , 
+                  top_k: int = 5) -> list:
+    """
+    Performs a BM25 search on a collection and retrieves the top relevant chunks.
+
+    This function executes a BM25-based search query on a specified collection to identify text 
+    chunks that are most relevant to the provided 'query'. It retrieves a limited number of the 
+    top matching objects, as specified by 'top_k', and returns the 'chunk' property of these objects.
+
+    Args:
+    query (str): The search query used to find relevant text chunks.
+    collection (weaviate.collections.collection.sync.Collection): The collection in which the BM25 search is performed.
+    top_k (int, optional): The number of top relevant objects to retrieve. Defaults to 5.
+
+    Returns:
+    List[str]: A list of text chunks that are most relevant to the given query.
+    """
+
+    response = collection.query.bm25(query=query, limit=top_k)
+    
+    response_objects = [x.properties for x in response.objects]
+    return response_objects
+
+print_object_properties(bm25_retrieve('Tell me about the last Taylor Swift show', collection, top_k = 2))
+
+def hybrid_retrieve(query: str, 
+                    collection: "weaviate.collections.collection.sync.Collection" , 
+                    alpha: float = 0.5,
+                    top_k: int = 5
+                   ) -> list:
+    """
+    Performs a hybrid search on a collection and retrieves the top relevant chunks.
+
+    This function executes a hybrid search that combines semantic vector search and traditional 
+    keyword-based search on a specified collection to find text chunks most relevant to the 
+    input 'query'. The relevance of results is influenced by 'alpha', which balances the weight 
+    between vector and keyword matches. It retrieves a limited number of top matching objects, 
+    as specified by 'top_k', and returns the 'chunk' property of these objects.
+
+    Args:
+    query (str): The search query used to find relevant text chunks.
+    collection (weaviate.collections.collection.sync.Collection): The collection in which the hybrid search is performed.
+    alpha (float, optional): A weighting factor that balances the contribution of semantic 
+    and keyword matches. Defaults to 0.5.
+    top_k (int, optional): The number of top relevant objects to retrieve. Defaults to 5.
+
+    Returns:
+    List[str]: A list of text chunks that are most relevant to the given query.
+    """
+    response = collection.query.hybrid(query=query, alpha=alpha, limit=top_k)
+    
+    response_objects = [x.properties for x in response.objects]
+    
+    return response_objects 
+
+print_object_properties(hybrid_retrieve('Tell me about the last Taylor Swift show', collection, top_k = 2))
+
+def semantic_search_with_reranking(query: str, 
+                                   rerank_property: str,
+                                   collection: "weaviate.collections.collection.sync.Collection" , 
+                                   rerank_query: str = None,
+                                   top_k: int = 5
+                                   ) -> list:
+    """
+    Performs a semantic search and reranks the results based on a specified property.
+
+    Args:
+        query (str): The search query to perform the initial search.
+        rerank_property (str): The property used for reranking the search results.
+        collection (weaviate.collections.collection.sync.Collection): The collection to search within.
+        rerank_query (str, optional): The query to use specifically for reranking. If not provided, 
+                                      the original query is used for reranking.
+        top_k (int, optional): The maximum number of top results to return. Defaults to 5.
+
+    Returns:
+        list: A list of properties from the reranked search results, where each item corresponds to 
+              an object in the collection.
+    """
+
+    # Set the rerank_query to be the same as the query if rerank_query is not passed (don't change this line)
+    if rerank_query is None: 
+        rerank_query = query 
+        
+    # Define the reranker with rerank_query and rerank_property
+    reranker = Rerank(
+            prop=rerank_property,                   # The property to rerank on
+            query=rerank_query  # If not provided, the original query will be used
+        )
+
+    # Retrieve using collection.query.near_text with the appropriate parameters (do not forget the rerank!)
+    response = collection.query.near_text(query=query, rerank=reranker, limit=top_k)
+    
+    response_objects = [x.properties for x in response.objects]
+    
+    return response_objects 
+
+query = 'Tell me about the conflicts in Latin America'
+# Get the results from a search (in this case the hybrid search)
+results = semantic_search_with_reranking(query, collection = collection, top_k = 2, rerank_property = 'chunk')
+print_object_properties(results)
+
+def generate_final_prompt(query: str, 
+                          top_k: int, 
+                          retrieve_function: callable,
+                          rerank_query: str = None, 
+                          rerank_property: str = None, 
+                          use_rerank: bool = False, 
+                          use_rag: bool = True) -> str:
+    """
+    Generates a final prompt by optionally retrieving and formatting relevant documents using retrieval-augmented generation (RAG).
+
+    Args:
+        query (str): The initial query to be used for document retrieval.
+        top_k (int): The number of top documents to retrieve and use for generating the prompt.
+        retrieve_function (callable): The function used to retrieve documents based on the query.
+        rerank_query (str, optional): The query used specifically for reranking documents if reranking is enabled.
+        rerank_property (str, optional): The property used for reranking. Required if 'use_rerank' is True.
+        use_rerank (bool, optional): Flag to denote whether to use reranking in document retrieval. Defaults to False.
+        use_rag (bool, optional): Flag to determine whether to use retrieval-augmented generation. Defaults to True.
+
+    Returns:
+        str: A constructed prompt that includes the original query and formatted retrieved documents if 'use_rag' is True.
+             Otherwise, it returns the original query.
+    """
+    # If no rag, return the query
     if not use_rag:
-        return prompt
-
-
-    # Determine which retrieve function to use based on its name.
-    if retrieve_function.__name__ == 'reciprocal_rank_fusion':
-        # Retrieve top documents using two different methods.
-        list1 = semantic_search_retrieve(query, top_k)
-        list2 = bm25_retrieve(query, top_k)
-        # Combine the results using reciprocal rank fusion.
-        top_k_indices = retrieve_function(list1, list2, top_k)
+        return query
+    
+    if use_rerank:
+        if rerank_property is None:
+            raise ValueError('rerank_property must be set if use_rerank = True')
+        top_k_documents = retrieve_function(query=query, top_k=top_k, collection = collection, rerank_property = rerank_property, rerank_query = rerank_query)
     else:
-        # Use the provided retrieval function.
-        top_k_indices = retrieve_function(query=query, top_k=top_k)
+        top_k_documents = retrieve_function(query=query, top_k=top_k, collection = collection)
     
+    # Initialize an empty string to store the formatted data.
+    formatted_data = ""
     
-    # Retrieve documents from the dataset using the indices.
-    relevant_documents = query_news(top_k_indices)
-    
-    formatted_documents = []
-
     # Iterate over each retrieved document.
-    for document in relevant_documents:
+    for document in top_k_documents:
         # Format each document into a structured string.
-        formatted_document = (
-            f"Title: {document['title']}, Description: {document['description']}, "
-            f"Published at: {document['published_at']}\nURL: {document['url']}"
+        document_layout = (
+            f"Title: {document['title']}, Chunk: {document['chunk']}, "
+            f"Published at: {document['pubDate']}\nURL: {document['link']}"
         )
         # Append the formatted string to the main data string with a newline for separation.
-        formatted_documents.append(formatted_document)
-
-    retrieve_data_formatted = "\n".join(formatted_documents)
+        formatted_data += document_layout + "\n"
     
+    # If use_rag flag is True, construct the enhanced prompt with the augmented data.
+    retrieve_data_formatted = formatted_data  # Store formatted data.
     prompt = (
         f"Answer the user query below. There will be provided additional information for you to compose your answer. "
         f"The relevant information provided is from 2024 and it should be added as your overall knowledge to answer the query, "
         f"you should not rely only on this information to answer the query, but add it to your overall knowledge."
+        f"The news data is ordered by relevance."
         f"Query: {query}\n"
         f"2024 News: {retrieve_data_formatted}"
     )
-
     
     return prompt
 
 print(generate_final_prompt("Tell me about the US GDP in the past 3 years."))
 
-def llm_call(query, retrieve_function = None, top_k = 5,use_rag = True):
+prompt = generate_final_prompt("Tell me the economic situation of the US in 2024.", top_k = 5, retrieve_function = semantic_search_retrieve, use_rerank = False, rerank_property = 'title')
+print(prompt)
 
-    # Get the system and user dictionaries
-    prompt = generate_final_prompt(query, top_k = top_k, retrieve_function = retrieve_function, use_rag = use_rag)
+def llm_call(query: str, 
+             retrieve_function: callable = None, 
+             top_k: int = 5, 
+             use_rag: bool = True, 
+             use_rerank: bool = False, 
+             rerank_property: str = None, 
+             rerank_query: str = None) -> str:
+    """
+    Simulates a call to a language model by generating a prompt and using it to produce a response.
 
-    generated_response = generate_with_single_input(prompt)
+    Args:
+        query (str): The initial query for which a response is sought.
+        retrieve_function (callable, optional): The function used to retrieve documents related to the query.
+        top_k (int, optional): The number of top documents to retrieve and use for generating the prompt. Defaults to 5.
+        use_rag (bool, optional): Indicates whether to use retrieval-augmented generation. Defaults to True.
+        use_rerank (bool, optional): Indicates whether to apply reranking to the retrieved documents. Defaults to False.
+        rerank_property (str, optional): The property to use for reranking. Required if 'use_rerank' is True.
+        rerank_query (str, optional): The query used specifically for reranking documents if reranking is enabled.
+
+    Returns:
+        str: The generated response content after processing the prompt with a language model.
+    """
+    
+    # Get the prompt
+    PROMPT = generate_final_prompt(query, top_k = top_k, retrieve_function = retrieve_function, use_rag = use_rag, use_rerank = use_rerank, rerank_property = rerank_property, rerank_query = rerank_query)
+    
+    generated_response = generate_with_single_input(PROMPT)
 
     generated_message = generated_response['content']
     
@@ -320,3 +519,11 @@ print(llm_call(query, retrieve_function = semantic_search_retrieve))
 # - https://www.wsj.com/articles/tech-spending-still-proves-thorny-for-some-advertising-companies-5d8216f2
 # - https://www.wsj.com/articles/tech-media-telecom-roundup-market-talk-f4376a81
 # - https://www.wsj.com/articles/energy-utilities-roundup-market-talk-9e840f2f
+
+
+query = "Tell me about United States and Brazil's relationship over the course of 2024. Provide links for the resources you use in the answer."
+
+print(llm_call(query = query, 
+               top_k = 5, 
+               retrieve_function = hybrid_retrieve, 
+               ))
