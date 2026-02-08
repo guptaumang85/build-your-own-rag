@@ -6,6 +6,7 @@ This repository walks through building a RAG pipeline that:
 - Retrieves relevant text from a dataset
 - Generates responses using a large language model
 - Combines retrieval with generation to answer queries
+- Create vector embeddings using weaviate api, flask, and use its functions to answer queries
 
 ---
 
